@@ -18,12 +18,14 @@ Light sensors
 Servo motors
 Solar panel
 Standard electronic components
+
 🔌 Setup
 Configure WiFi credentials in the code
 Upload firmware to both microcontrollers
 Connect sensors and actuators according to pin assignments
 Power on the system
 Access the web dashboard via the assigned IP address
+
 🚀 Usage
 The system automatically begins tracking once powered on. Access the web interface to monitor performance in real-time.
 
