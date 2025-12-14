@@ -7,6 +7,7 @@ Real-time web dashboard with data visualization
 WiFi connectivity for remote monitoring
 Closed-loop control system
 Responsive interface for all devices
+
 📊 Performance
 Measurements indicated an observable increase in output voltage when the panel was actively aligned toward the light source compared to a fixed orientation. The system consistently adjusted its position to reduce sensor light differentials, demonstrating effective closed-loop control.
 
