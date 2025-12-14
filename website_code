@@ -1,0 +1,358 @@
+#include <WiFi.h>
+#include <WebServer.h>
+
+
+// WiFi CREDENTIALS - CHANGE THESE!
+const char* ssid = "wifiname";        // Replace with your WiFi name
+const char* password = "password"; // Replace with your WiFi password
+
+// WEB SERVER
+WebServer server(80);  // Web server on port 80
+
+// DATA VARIABLES
+float luxValue = 0.0;          // Light intensity
+int azimuth = 90;              // Azimuth angle
+int elevation = 90;            // Elevation angle
+String systemMode = "STANDBY"; // Current mode
+unsigned long lastDataUpdate = 0;  // Track when data was last received
+unsigned long startTime = 0;   // System start time
+
+
+void setup() {
+  Serial.begin(115200);
+  startTime = millis();
+  delay(1000);
+  
+  WiFi.mode(WIFI_STA); 
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+    delay(500);
+    attempts++;
+    Serial.print(".");
+  }
+  Serial.println(); 
+  if (WiFi.status() == WL_CONNECTED) {
+
+    Serial.println("WiFi connected!");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+
+    server.on("/", handleRoot);
+    server.on("/data", handleData);
+    server.on("/mode", handleMode);
+    server.on("/control", handleControl);
+    server.onNotFound(handleNotFound);
+
+    server.begin();
+  } 
+  else {
+    Serial.println("WiFi failed to connect!");
+    Serial.println("Check SSID/password or signal strength.");
+    Serial.println("Web server NOT started.");
+  }
+}
+
+// MAIN LOOP - Runs continuously
+void loop() {
+  // Handle incoming web requests
+  server.handleClient();
+  
+  // Read data from Arduino via Serial
+  if (Serial.available() > 0) {
+    String data = Serial.readStringUntil('\n');
+    data.trim();
+    parseArduinoData(data);
+  }
+  
+  // Request status update if no data for 5 seconds
+  if (millis() - lastDataUpdate > 5000) {
+    Serial.println("GET:STATUS");
+    lastDataUpdate = millis();
+  }
+}
+
+// PARSE DATA FROM ARDUINO
+void parseArduinoData(String data) {
+  if (data.startsWith("DATA:")) {
+    // Remove "DATA:" prefix
+    data = data.substring(5);
+    
+    // Parse format: LUX|AZIMUTH|ELEVATION|MODE
+    int firstPipe = data.indexOf('|');
+    int secondPipe = data.indexOf('|', firstPipe + 1);
+    int thirdPipe = data.indexOf('|', secondPipe + 1);
+    
+    if (firstPipe > 0 && secondPipe > 0 && thirdPipe > 0) {
+      luxValue = data.substring(0, firstPipe).toFloat();
+      azimuth = data.substring(firstPipe + 1, secondPipe).toInt();
+      elevation = data.substring(secondPipe + 1, thirdPipe).toInt();
+      systemMode = data.substring(thirdPipe + 1);
+      
+      lastDataUpdate = millis();
+    }
+  }
+}
+
+
+// WEB PAGE HANDLER - Main Interface
+void handleRoot() {
+  String html = F("<!DOCTYPE html><html lang='en'><head>");
+  html += F("<meta charset='UTF-8'>");
+  html += F("<meta name='viewport' content='width=device-width, initial-scale=1.0'>");
+  html += F("<title>Solar Tracker Control Panel</title>");
+  
+
+  html += F("<style>");
+  html += F(":root{--primary:#3b82f6;--secondary:#10b981;--warning:#f59e0b;--danger:#ef4444;--dark-bg:#0f172a;--dark-card:#1e293b;}");
+  html += F("*{margin:0;padding:0;box-sizing:border-box}");
+  html += F("body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);min-height:100vh;padding:20px;color:#f3f4f6;line-height:1.6}");
+  html += F(".container{max-width:1400px;margin:0 auto}");
+  html += F(".header{text-align:center;color:white;margin-bottom:40px;padding:30px 20px}");
+  html += F(".header-title{font-size:42px;font-weight:700;margin-bottom:12px;letter-spacing:-0.5px;text-shadow:0 2px 8px rgba(0,0,0,0.3)}");
+  html += F(".header-subtitle{font-size:18px;opacity:0.95;font-weight:300;display:flex;align-items:center;justify-content:center;gap:10px}");
+  html += F(".header-logo{font-size:50px;margin-bottom:15px;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.3))}");
+  html += F(".dashboard-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:20px;margin-bottom:20px}");
+  html += F(".card{background:var(--dark-card);border-radius:16px;padding:30px;box-shadow:0 4px 6px rgba(0,0,0,0.3);transition:transform 0.2s ease;border:1px solid rgba(255,255,255,0.05)}");
+  html += F(".card:hover{transform:translateY(-2px);box-shadow:0 8px 12px rgba(0,0,0,0.4)}");
+  html += F(".card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px;padding-bottom:15px;border-bottom:2px solid rgba(255,255,255,0.1)}");
+  html += F(".card-title{font-size:20px;font-weight:700;color:white;display:flex;align-items:center;gap:10px}");
+  html += F(".light-intensity-card{grid-column:span 6}");
+  html += F(".position-card{grid-column:span 6}");
+  html += F(".chart-card{grid-column:span 12}");
+  html += F(".diagnostics-card{grid-column:span 7}");
+  html += F(".system-info-card{grid-column:span 5}");
+  html += F(".status-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:50px;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:0.5px}");
+  html += F(".status-tracking{background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:white}");
+  html += F(".status-standby{background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white}");
+  html += F(".status-dot{width:8px;height:8px;border-radius:50%;background:white;animation:pulse 2s infinite}");
+  html += F("@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}");
+  html += F(".lux-display{text-align:center;padding:30px 0}");
+  html += F(".lux-value{font-size:72px;font-weight:700;background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;margin-bottom:10px}");
+  html += F(".lux-unit{font-size:24px;color:#9ca3af;font-weight:500}");
+  html += F(".lux-bar{height:8px;background:rgba(255,255,255,0.1);border-radius:10px;margin-top:20px;overflow:hidden}");
+  html += F(".lux-bar-fill{height:100%;background:linear-gradient(90deg,#fbbf24 0%,#f59e0b 50%,#ef4444 100%);border-radius:10px;transition:width 0.5s ease;width:0%}");
+  html += F(".gauge-container{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px}");
+  html += F(".gauge{background:rgba(255,255,255,0.03);padding:25px;border-radius:12px;text-align:center;border:1px solid rgba(255,255,255,0.05);transition:all 0.3s ease}");
+  html += F(".gauge:hover{background:rgba(255,255,255,0.05);border-color:var(--primary)}");
+  html += F(".gauge-label{font-size:11px;color:#9ca3af;margin-bottom:15px;text-transform:uppercase;letter-spacing:1.5px;font-weight:700}");
+  html += F(".gauge-value{font-size:48px;font-weight:700;background:linear-gradient(135deg,var(--primary) 0%,#06b6d4 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;display:flex;align-items:baseline;justify-content:center;gap:6px}");
+  html += F(".gauge-unit{font-size:24px;opacity:0.8}");
+  html += F(".chart-container{height:300px;margin-top:20px;position:relative}");
+  html += F("#lightChart{width:100%;height:100%}");
+  html += F(".diagnostic-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:20px}");
+  html += F(".diagnostic-item{background:rgba(255,255,255,0.03);padding:20px;border-radius:10px;border-left:3px solid var(--secondary)}");
+  html += F(".diagnostic-label{font-size:12px;color:#9ca3af;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}");
+  html += F(".diagnostic-value{font-size:24px;font-weight:700;color:white}");
+  html += F(".diagnostic-status{font-size:13px;margin-top:5px;color:var(--secondary);font-weight:500}");
+  html += F(".info-list{list-style:none;margin-top:20px}");
+  html += F(".info-item{padding:15px;margin-bottom:10px;background:rgba(255,255,255,0.03);border-radius:8px;display:flex;justify-content:space-between;align-items:center;border-left:3px solid var(--primary)}");
+  html += F(".info-label{font-size:13px;color:#9ca3af;font-weight:500}");
+  html += F(".info-value{font-size:14px;color:white;font-weight:600}");
+  html += F(".connection-indicator{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px}");
+  html += F(".connected{background:var(--secondary);box-shadow:0 0 12px var(--secondary);animation:pulse 2s infinite}");
+  html += F(".disconnected{background:var(--danger)}");
+  html += F(".footer{text-align:center;color:rgba(255,255,255,0.6);padding:30px 20px;margin-top:40px}");
+  html += F("@media(max-width:1024px){.light-intensity-card,.position-card,.diagnostics-card,.system-info-card{grid-column:span 12}.diagnostic-grid{grid-template-columns:1fr}}");
+  html += F("@media(max-width:768px){.gauge-container{grid-template-columns:1fr}.lux-value{font-size:56px}}");
+  html += F("</style></head><body>");
+  
+  // HTML Content
+  html += F("<div class='container'>");
+  html += F("<header class='header'>");
+  html += F("<div class='header-logo'>☀️</div>");
+  html += F("<h1 class='header-title'>Solar Tracker Control Panel</h1>");
+  html += F("<p class='header-subtitle'><span class='connection-indicator connected' id='connIndicator'></span>Real-time Monitoring System</p>");
+  html += F("</header>");
+  
+  html += F("<div class='dashboard-grid'>");
+  
+  // Light Intensity Card
+  html += F("<div class='card light-intensity-card'>");
+  html += F("<div class='card-header'>");
+  html += F("<h2 class='card-title'><span>💡</span>Light Intensity</h2>");
+  html += F("<span id='statusBadge' class='status-badge status-standby'><span class='status-dot'></span>INITIALIZING</span>");
+  html += F("</div>");
+  html += F("<div class='lux-display'>");
+  html += F("<div class='lux-value' id='lux'>--</div>");
+  html += F("<div class='lux-unit'>Lux</div>");
+  html += F("<div class='lux-bar'><div class='lux-bar-fill' id='luxBar'></div></div>");
+  html += F("</div></div>");
+  
+  // Position Card
+  html += F("<div class='card position-card'>");
+  html += F("<div class='card-header'><h2 class='card-title'><span>📍</span>Panel Position</h2></div>");
+  html += F("<div class='gauge-container'>");
+  html += F("<div class='gauge'><div class='gauge-label'>🧭 Azimuth</div>");
+  html += F("<div class='gauge-value'><span id='azimuth'>--</span><span class='gauge-unit'>°</span></div></div>");
+  html += F("<div class='gauge'><div class='gauge-label'>📐 Elevation</div>");
+  html += F("<div class='gauge-value'><span id='elevation'>--</span><span class='gauge-unit'>°</span></div></div>");
+  html += F("</div></div>");
+  
+  // Chart Card
+  html += F("<div class='card chart-card'>");
+  html += F("<div class='card-header'><h2 class='card-title'><span>📈</span>Historical Light Intensity</h2></div>");
+  html += F("<div class='chart-container'><canvas id='lightChart'></canvas></div>");
+  html += F("</div>");
+  
+  // Diagnostics Card
+  html += F("<div class='card diagnostics-card'>");
+  html += F("<div class='card-header'><h2 class='card-title'><span>🔧</span>System Diagnostics</h2></div>");
+  html += F("<div class='diagnostic-grid'>");
+  html += F("<div class='diagnostic-item'><div class='diagnostic-label'>System Uptime</div>");
+  html += F("<div class='diagnostic-value' id='uptime'>00:00:00</div>");
+  html += F("<div class='diagnostic-status'>● Operational</div></div>");
+  html += F("<div class='diagnostic-item'><div class='diagnostic-label'>Motor Status</div>");
+  html += F("<div class='diagnostic-value' id='motorStatus'>OK</div>");
+  html += F("<div class='diagnostic-status' id='motorStatusText'>● Normal Operation</div></div>");
+  html += F("<div class='diagnostic-item'><div class='diagnostic-label'>Sensor Health</div>");
+  html += F("<div class='diagnostic-value' id='sensorHealth'>100%</div>");
+  html += F("<div class='diagnostic-status'>● All Sensors Active</div></div>");
+  html += F("</div></div>");
+  
+  // System Info Card
+  html += F("<div class='card system-info-card'>");
+  html += F("<div class='card-header'><h2 class='card-title'><span>ℹ️</span>System Info</h2></div>");
+  html += F("<ul class='info-list'>");
+  html += F("<li class='info-item'><span class='info-label'>📡 WiFi Network</span><span class='info-value' id='wifiName'>--</span></li>");
+  html += F("<li class='info-item'><span class='info-label'>🌐 IP Address</span><span class='info-value' id='ipAddress'>--</span></li>");
+  html += F("<li class='info-item'><span class='info-label'>📶 Signal</span><span class='info-value' id='signalStrength'>--</span></li>");
+  html += F("</ul></div>");
+  
+  html += F("</div>");
+  html += F("<footer class='footer'><p>Real-time Solar Tracking Dashboard</p></footer>");
+  html += F("</div>");
+  
+  // JavaScript - Minified
+  html += F("<script>");
+  html += F("let updateInterval,startTime=Date.now(),chartData=[],chart=null;const MAX_DATA_POINTS=30;");
+  html += F("function initChart(){const ctx=document.getElementById('lightChart').getContext('2d');");
+  html += F("const gradient=ctx.createLinearGradient(0,0,0,300);gradient.addColorStop(0,'rgba(251,191,36,0.3)');");
+  html += F("gradient.addColorStop(1,'rgba(251,191,36,0)');chart={ctx:ctx,gradient:gradient,data:[]};drawChart()}");
+  html += F("function drawChart(){if(!chart)return;const ctx=chart.ctx,canvas=ctx.canvas,width=canvas.width,height=canvas.height;");
+  html += F("ctx.clearRect(0,0,width,height);if(chartData.length<2){ctx.fillStyle='rgba(255,255,255,0.1)';");
+  html += F("ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText('Collecting data...',width/2,height/2);return}");
+  html += F("const values=chartData.map(d=>d.value),maxVal=Math.max(...values,1000),minVal=Math.min(...values,0),range=maxVal-minVal||1;");
+  html += F("ctx.strokeStyle='rgba(255,255,255,0.05)';ctx.lineWidth=1;for(let i=0;i<=5;i++){const y=(height-40)*(i/5)+20;");
+  html += F("ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(width-20,y);ctx.stroke()}");
+  html += F("ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='11px sans-serif';ctx.textAlign='right';");
+  html += F("for(let i=0;i<=5;i++){const y=(height-40)*(i/5)+20,val=maxVal-(range*(i/5));ctx.fillText(Math.round(val),35,y+4)}");
+  html += F("ctx.fillStyle=chart.gradient;ctx.beginPath();chartData.forEach((point,i)=>{");
+  html += F("const x=40+((width-60)/(MAX_DATA_POINTS-1))*i,y=height-20-((point.value-minVal)/range)*(height-40);");
+  html += F("if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});");
+  html += F("ctx.lineTo(40+((width-60)/(MAX_DATA_POINTS-1))*(chartData.length-1),height-20);ctx.lineTo(40,height-20);");
+  html += F("ctx.closePath();ctx.fill();ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.beginPath();");
+  html += F("chartData.forEach((point,i)=>{const x=40+((width-60)/(MAX_DATA_POINTS-1))*i,y=height-20-((point.value-minVal)/range)*(height-40);");
+  html += F("if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)});ctx.stroke();ctx.fillStyle='#fbbf24';");
+  html += F("chartData.forEach((point,i)=>{const x=40+((width-60)/(MAX_DATA_POINTS-1))*i,y=height-20-((point.value-minVal)/range)*(height-40);");
+  html += F("ctx.beginPath();ctx.arc(x,y,3,0,Math.PI*2);ctx.fill()})}");
+  html += F("function addChartData(value){chartData.push({time:new Date(),value:value});");
+  html += F("if(chartData.length>MAX_DATA_POINTS)chartData.shift();drawChart()}");
+  html += F("function formatUptime(ms){const seconds=Math.floor(ms/1000),hours=Math.floor(seconds/3600),");
+  html += F("minutes=Math.floor((seconds%3600)/60),secs=seconds%60;");
+  html += F("return `${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(secs).padStart(2,'0')}`}");
+  html += F("function updateData(){fetch('/data').then(response=>{if(!response.ok)throw new Error('Network error');return response.json()})");
+  html += F(".then(data=>{const luxValue=data.lux||0;document.getElementById('lux').innerText=luxValue.toFixed(1);");
+  html += F("const luxPercent=Math.min((luxValue/2000)*100,100);document.getElementById('luxBar').style.width=luxPercent+'%';");
+  html += F("addChartData(luxValue);document.getElementById('azimuth').innerText=data.azimuth||'--';");
+  html += F("document.getElementById('elevation').innerText=data.elevation||'--';const badge=document.getElementById('statusBadge');");
+  html += F("const mode=data.mode||'UNKNOWN';badge.innerHTML=`<span class='status-dot'></span>${mode}`;");
+  html += F("badge.className='status-badge status-'+mode.toLowerCase();");
+  html += F("if(data.diagnostics){document.getElementById('motorStatus').innerText=data.diagnostics.motor||'OK';");
+  html += F("document.getElementById('sensorHealth').innerText=(data.diagnostics.sensorHealth||100)+'%'}");
+  html += F("document.getElementById('connIndicator').className='connection-indicator connected';");
+  html += F("if(data.wifi){document.getElementById('wifiName').innerText=data.wifi.ssid||'Unknown';");
+  html += F("document.getElementById('ipAddress').innerText=data.wifi.ip||'0.0.0.0';");
+  html += F("document.getElementById('signalStrength').innerText=(data.wifi.rssi||'--')+' dBm'}");
+  html += F("}).catch(error=>{console.error('Update failed:',error);");
+  html += F("document.getElementById('connIndicator').className='connection-indicator disconnected'})}");
+  html += F("function updateUptime(){const uptime=Date.now()-startTime;document.getElementById('uptime').innerText=formatUptime(uptime)}");
+  html += F("function resizeChart(){const canvas=document.getElementById('lightChart'),container=canvas.parentElement;");
+  html += F("canvas.width=container.offsetWidth;canvas.height=container.offsetHeight;drawChart()}");
+  html += F("window.onload=function(){const canvas=document.getElementById('lightChart'),container=canvas.parentElement;");
+  html += F("canvas.width=container.offsetWidth;canvas.height=container.offsetHeight;initChart();");
+  html += F("updateData();updateInterval=setInterval(updateData,2000);setInterval(updateUptime,1000);");
+  html += F("window.addEventListener('resize',resizeChart)};");
+  html += F("window.onbeforeunload=function(){if(updateInterval)clearInterval(updateInterval)};");
+  html += F("</script></body></html>");
+  
+  server.send(200, "text/html", html);
+}
+// DATA API HANDLER - Returns JSON data
+void handleData() {
+  String json = "{";
+  json += "\"lux\":" + String(luxValue, 2) + ",";
+  json += "\"azimuth\":" + String(azimuth) + ",";
+  json += "\"elevation\":" + String(elevation) + ",";
+  json += "\"mode\":\"" + systemMode + "\",";
+  json += "\"diagnostics\":{";
+  json += "\"motor\":\"OK\",";
+  json += "\"sensorHealth\":100";
+  json += "},";
+  json += "\"wifi\":{";
+  json += "\"ssid\":\"" + String(ssid) + "\",";
+  json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+  json += "\"rssi\":" + String(WiFi.RSSI());
+  json += "}";
+  json += "}";
+  
+  server.send(200, "application/json", json);
+}
+
+// MODE CONTROL HANDLER
+void handleMode() {
+  if (server.hasArg("mode")) {
+    String mode = server.arg("mode");
+    mode.toUpperCase();
+    
+    if (mode == "TRACKING") {
+      Serial.println("MODE:TRACKING");
+      server.send(200, "text/plain", "OK");
+    } 
+    else if (mode == "STANDBY") {
+      Serial.println("MODE:STANDBY");
+      server.send(200, "text/plain", "OK");
+    }
+    else {
+      server.send(400, "text/plain", "Invalid mode");
+    }
+  } else {
+    server.send(400, "text/plain", "Missing mode parameter");
+  }
+}
+
+// MANUAL CONTROL HANDLER
+void handleControl() {
+  if (server.hasArg("action")) {
+    String action = server.arg("action");
+    
+    if (action == "reset") {
+      Serial.println("RESET:CENTER");
+      server.send(200, "text/plain", "OK");
+    }
+    else {
+      server.send(400, "text/plain", "Unknown action");
+    }
+  }
+  else if (server.hasArg("azimuth")) {
+    int az = server.arg("azimuth").toInt();
+    Serial.println("SET:AZIMUTH:" + String(az));
+    server.send(200, "text/plain", "OK");
+  }
+  else if (server.hasArg("elevation")) {
+    int el = server.arg("elevation").toInt();
+    Serial.println("SET:ELEVATION:" + String(el));
+    server.send(200, "text/plain", "OK");
+  }
+  else {
+    server.send(400, "text/plain", "Missing parameters");
+  }
+}
+
+// 404 NOT FOUND HANDLER
+
+void handleNotFound() {
+  server.send(404, "text/plain", "404 - Page Not Found");
+}
+
